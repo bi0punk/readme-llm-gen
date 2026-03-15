@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-readme-rebuilder"
+version = "0.8.0"
+description = "Generate or rebuild professional README files for local projects using LangGraph and a local LLM"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "OpenAI" }
+]
+dependencies = [
+  "langchain>=0.3.0",
+  "langgraph>=0.2.0",
+  "langchain-ollama>=0.2.0",
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.1",
+  "typer>=0.12.3",
+  "rich>=13.7.1",
+  "pyyaml>=6.0.2"
+]
+
+[project.scripts]
+readme-rebuilder = "readme_rebuilder.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

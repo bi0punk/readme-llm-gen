@@ -1,0 +1,86 @@
+llm:
+  base_url: "http://localhost:11434"
+  model: "qwen2.5:7b"
+  temperature: 0.1
+
+discovery:
+  max_depth: 3
+  include_hidden: false
+  exclude_dirs:
+    - ".git"
+    - ".venv"
+    - "venv"
+    - "env"
+    - "ENV"
+    - "node_modules"
+    - "dist"
+    - "build"
+    - "__pycache__"
+    - ".mypy_cache"
+    - ".pytest_cache"
+    - ".idea"
+    - ".vscode"
+  project_markers:
+    - ".git"
+    - "pyproject.toml"
+    - "requirements.txt"
+    - "package.json"
+    - "Dockerfile"
+    - "docker-compose.yml"
+    - "docker-compose.yaml"
+    - "Makefile"
+    - "app.py"
+    - "main.py"
+    - "manage.py"
+
+scanner:
+  max_files: 10
+  max_file_chars: 3500
+  max_total_chars: 22000
+  max_tree_entries: 250
+  max_tree_depth: 4
+  tree_mode: "system_auto"
+  tree_timeout_seconds: 8
+  exclude_dirs:
+    - ".git"
+    - ".venv"
+    - "venv"
+    - "env"
+    - "ENV"
+    - "env"
+    - "ENV"
+    - ".tox"
+    - ".nox"
+    - ".direnv"
+    - "node_modules"
+    - "dist"
+    - "build"
+    - "__pycache__"
+    - ".mypy_cache"
+    - ".pytest_cache"
+    - ".idea"
+    - ".vscode"
+  important_file_patterns:
+    - "app.py"
+    - "main.py"
+    - "manage.py"
+    - "server.py"
+    - "api.py"
+    - "settings.py"
+    - "routes.py"
+    - "requirements.txt"
+    - "pyproject.toml"
+    - "package.json"
+    - "Dockerfile"
+    - "docker-compose*.yml"
+    - "docker-compose*.yaml"
+    - "Makefile"
+    - ".env.example"
+    - "README.md"
+    - "README.rst"
+    - ".gitignore"
+
+output:
+  readme_name: "README.generated.md"
+  report_dir: ".readme_rebuilder"
+  save_analysis_json: true
