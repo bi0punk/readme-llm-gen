@@ -8,11 +8,20 @@ from langgraph.graph import END, StateGraph
 
 from readme_rebuilder.graph.state import GraphState
 from readme_rebuilder.models.schemas import ReadmeBlueprint
-from readme_rebuilder.prompts.templates import BLUEPRINT_PROMPT, README_BASE_TEMPLATE
+from readme_rebuilder.prompts.templates import (
+    BLUEPRINT_PROMPT,
+    BLUEPRINT_PROMPT_FAST,
+    README_BASE_TEMPLATE,
+)
+
+# Umbral: si el prompt supera este tamaño, advertir en el observer
+_PROMPT_WARN_CHARS = 6_000
 
 
 class ReadmeGraphBuilder:
-    def __init__(self, tree_service, file_selector_service, heuristics_service, llm_service, writer_service, git_context_service, settings) -> None:
+    def __init__(self, tree_service, file_selector_service, heuristics_service,
+                 llm_service, writer_service, git_context_service, settings,
+                 fast: bool = False) -> None:
         self.tree_service = tree_service
         self.file_selector_service = file_selector_service
         self.heuristics_service = heuristics_service
@@ -20,6 +29,7 @@ class ReadmeGraphBuilder:
         self.writer_service = writer_service
         self.git_context_service = git_context_service
         self.settings = settings
+        self.fast = fast  # --fast: prompt reducido, respuesta más rápida
 
     def _observer(self, state: GraphState):
         return state.get('observer')
@@ -35,6 +45,8 @@ class ReadmeGraphBuilder:
         if observer:
             observer.step_done(step_name, summary)
 
+    # ── Helpers síncronos para el executor ────────────────────────────────────
+
     def _collect_tree(self, project_path: Path) -> dict:
         return self.tree_service.build_tree_summary(project_path)
 
@@ -47,6 +59,8 @@ class ReadmeGraphBuilder:
         existing_readme, filtered = self.file_selector_service.split_existing_readme(payload)
         file_paths = [item['path'] for item in filtered]
         return filtered, file_paths, existing_readme
+
+    # ── Nodo 1: gather_context ────────────────────────────────────────────────
 
     def gather_context(self, state: GraphState) -> GraphState:
         """Tree + git + file selection en paralelo con ThreadPoolExecutor."""
@@ -91,6 +105,8 @@ class ReadmeGraphBuilder:
             'existing_readme':     existing_readme,
         }
 
+    # ── Nodo 2: run_heuristics ────────────────────────────────────────────────
+
     def run_heuristics(self, state: GraphState) -> GraphState:
         self._start(state, 'run_heuristics')
         project_path = Path(state['project_path'])
@@ -117,19 +133,42 @@ class ReadmeGraphBuilder:
         self._done(state, 'run_heuristics', summary)
         return {'heuristic_facts': facts}
 
+    # ── Nodo 3: build_blueprint ───────────────────────────────────────────────
+
     def build_blueprint(self, state: GraphState) -> GraphState:
         self._start(state, 'build_blueprint')
-        snippets = json.dumps(state['selected_files'], ensure_ascii=False, indent=2)
-        prompt = BLUEPRINT_PROMPT.format(
-            base_template=README_BASE_TEMPLATE,
-            tree_text=state['tree_summary'].get('tree_text', ''),
-            heuristic_facts=json.dumps(state['heuristic_facts'], ensure_ascii=False, indent=2),
-            git_context=json.dumps(state.get('git_context', {}), ensure_ascii=False, indent=2),
-            existing_readme=state.get('existing_readme', ''),
-            
-            
-            selected_file_snippets=snippets,
-        )
+
+        # Modo fast: prompt mínimo, sin README previo ni git, snippets recortados
+        if self.fast:
+            snippets = json.dumps(
+                [{**f, 'content': f['content'][:1500]} for f in state['selected_files']],
+                ensure_ascii=False,
+            )
+            prompt = BLUEPRINT_PROMPT_FAST.format(
+                tree_text=state['tree_summary'].get('tree_text', ''),
+                heuristic_facts=json.dumps(state['heuristic_facts'], ensure_ascii=False),
+                selected_file_snippets=snippets,
+            )
+        else:
+            snippets = json.dumps(state['selected_files'], ensure_ascii=False, indent=2)
+            prompt = BLUEPRINT_PROMPT.format(
+                base_template=README_BASE_TEMPLATE,
+                tree_text=state['tree_summary'].get('tree_text', ''),
+                heuristic_facts=json.dumps(state['heuristic_facts'], ensure_ascii=False, indent=2),
+                git_context=json.dumps(state.get('git_context', {}), ensure_ascii=False, indent=2),
+                existing_readme=state.get('existing_readme', ''),
+                selected_file_snippets=snippets,
+            )
+
+        observer = self._observer(state)
+        if observer and len(prompt) > _PROMPT_WARN_CHARS:
+            observer.info(
+                'Prompt grande detectado',
+                f'{len(prompt)} chars → el LLM puede tardar varios minutos.\n'
+                'Usa [bold]--fast[/] para un prompt reducido (~60s en modelos 7B).',
+                style='yellow',
+            )
+
         blueprint = self.llm_service.structured(prompt, ReadmeBlueprint, label='readme_blueprint')
         self._done(state, 'build_blueprint', f"{blueprint.project_type} · {blueprint.primary_language} · {len(blueprint.features)} features")
         return {
@@ -141,6 +180,8 @@ class ReadmeGraphBuilder:
                 'one_liner':        blueprint.one_liner,
             },
         }
+
+    # ── Nodo 4: write_outputs ─────────────────────────────────────────────────
 
     def write_outputs(self, state: GraphState) -> GraphState:
         self._start(state, 'write_outputs')
@@ -171,6 +212,8 @@ class ReadmeGraphBuilder:
             'heuristic_facts': state['heuristic_facts'],
             'existing_readme': state.get('existing_readme', ''),
         }
+
+    # ── Compilación ───────────────────────────────────────────────────────────
 
     def compile(self):
         graph = StateGraph(GraphState)

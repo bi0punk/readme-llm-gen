@@ -158,6 +158,7 @@ class LLMService:
     def structured(self, prompt: str, schema: Type[T], label: str = 'structured_call') -> T:
         self._ensure_model()
         if self.observer:
+            self.observer.llm_prompt(label=label, prompt=prompt)
             self.observer.llm_start(label=label, prompt_chars=len(prompt), schema_name=schema.__name__)
         chain = self.model.with_structured_output(schema)
         result = chain.invoke(prompt)
@@ -169,6 +170,7 @@ class LLMService:
     def text(self, prompt: str, label: str = 'text_call') -> str:
         self._ensure_model()
         if self.observer:
+            self.observer.llm_prompt(label=label, prompt=prompt)
             self.observer.llm_start(label=label, prompt_chars=len(prompt), schema_name=None)
         response = self.model.invoke(prompt)
         content = getattr(response, 'content', response)

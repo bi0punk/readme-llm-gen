@@ -8,6 +8,8 @@ from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.rule import Rule
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -34,8 +36,10 @@ class ConsoleRunObserver:
     console: Console
     show_thinking: bool = False
     verbose: bool = False
+    debug_llm: bool = False          # --debug-llm: muestra prompt completo + respuesta raw
     events: list[dict[str, Any]] = field(default_factory=list)
     _timers: dict[str, float] = field(default_factory=dict)
+    _pending_prompts: dict[str, str] = field(default_factory=dict)  # label → prompt
     current_project: str | None = None
     current_project_path: str | None = None
 
@@ -48,7 +52,8 @@ class ConsoleRunObserver:
         body = (
             f"[bold]Proyecto:[/] {project_path.name}\n"
             f"[bold]Ruta:[/] {project_path}\n"
-            f"[bold]Modo diagnóstico LLM:[/] {'activo' if self.show_thinking else 'resumido'}"
+            f"[bold]Modo diagnóstico LLM:[/] {'activo' if self.show_thinking else 'resumido'}\n"
+            f"[bold]Debug LLM completo:[/] {'activo' if self.debug_llm else 'no'}"
         )
         self.console.print(Panel.fit(body, title="Inicio de análisis", border_style="cyan"))
         self._emit_event("project_start", project_name=project_path.name, project_path=str(project_path))
@@ -120,6 +125,21 @@ class ConsoleRunObserver:
         self.console.print(table)
         self._emit_event("heuristics", facts=facts)
 
+    # ── Métodos LLM — aquí está el nuevo debug_llm ───────────────────────────
+
+    def llm_prompt(self, label: str, prompt: str) -> None:
+        """Llamado por llm_service justo antes de invocar el modelo.
+        Solo imprime si debug_llm=True."""
+        self._pending_prompts[label] = prompt
+        if not self.debug_llm:
+            return
+        self.console.print(Rule(f"[bold magenta]PROMPT → {label}[/] ({len(prompt)} chars)", style="magenta"))
+        # Syntax highlight básico: el prompt es texto plano pero Syntax lo hace
+        # scrollable y con número de líneas, más fácil de leer en terminal.
+        self.console.print(Syntax(prompt, "text", theme="monokai", word_wrap=True, line_numbers=True))
+        self.console.print(Rule(style="magenta dim"))
+        self._emit_event("llm_prompt", label=label, prompt=prompt)
+
     def llm_start(self, label: str, prompt_chars: int, schema_name: str | None = None) -> None:
         meta = f"{prompt_chars} chars"
         if schema_name:
@@ -129,7 +149,11 @@ class ConsoleRunObserver:
 
     def llm_result(self, label: str, summary: str, raw_excerpt: str | None = None) -> None:
         self.console.print(f"[bold magenta]↳[/] {label}: {summary}")
-        if self.show_thinking and raw_excerpt:
+        if self.debug_llm and raw_excerpt:
+            self.console.print(Rule(f"[bold magenta]RESPUESTA ← {label}[/]", style="magenta"))
+            self.console.print(Syntax(raw_excerpt, "json", theme="monokai", word_wrap=True, line_numbers=True))
+            self.console.print(Rule(style="magenta dim"))
+        elif self.show_thinking and raw_excerpt:
             self.console.print(Panel.fit(raw_excerpt, title=f"Diagnóstico LLM · {label}", border_style="magenta"))
         self._emit_event("llm_result", label=label, summary=summary, raw_excerpt=raw_excerpt or "")
 

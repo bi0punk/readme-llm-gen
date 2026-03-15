@@ -28,7 +28,7 @@ console = Console()
 logger = logging.getLogger(__name__)
 
 
-def _build_workflow(settings: AppSettings):
+def _build_workflow(settings: AppSettings, fast: bool = False):
     llm_service = LLMService(settings.llm)
     builder = ReadmeGraphBuilder(
         tree_service=TreeService(settings.scanner),
@@ -38,6 +38,7 @@ def _build_workflow(settings: AppSettings):
         writer_service=WriterService(settings.output),
         git_context_service=GitContextService(),
         settings=settings,
+        fast=fast,
     )
     workflow = builder.compile()
     return workflow, llm_service
@@ -52,7 +53,12 @@ def _render_result_table(results: list[dict]) -> Table:
     for item in results:
         status = item.get('status', 'ok')
         status_style = 'green' if status == 'ok' else 'red'
-        table.add_row(item.get('project_name', '-'), 'sí' if item.get('had_existing_readme') else 'no', item.get('output_path', '-'), f'[{status_style}]{status}[/]')
+        table.add_row(
+            item.get('project_name', '-'),
+            'sí' if item.get('had_existing_readme') else 'no',
+            item.get('output_path', '-'),
+            f'[{status_style}]{status}[/]',
+        )
     return table
 
 
@@ -71,8 +77,8 @@ def _show_llm_preflight(preflight: dict) -> None:
     console.print(Panel.fit(body, title='Preflight LLM', border_style='magenta'))
 
 
-def _run_single_project(workflow, project_path: Path, overwrite: bool, show_thinking: bool, verbose: bool) -> dict:
-    observer = ConsoleRunObserver(console=console, show_thinking=show_thinking, verbose=verbose)
+def _run_single_project(workflow, project_path: Path, overwrite: bool, show_thinking: bool, verbose: bool, debug_llm: bool = False) -> dict:
+    observer = ConsoleRunObserver(console=console, show_thinking=show_thinking, verbose=verbose, debug_llm=debug_llm)
     observer.project_start(project_path)
     try:
         result = workflow.invoke({'project_path': str(project_path), 'overwrite_readme': overwrite, 'observer': observer})
@@ -106,19 +112,26 @@ def project(
     config: str = typer.Option('config.yaml', '--config', help='Path to YAML config'),
     model: str | None = typer.Option(None, '--model', help='Override Ollama model for this run'),
     overwrite: bool = typer.Option(False, '--overwrite', help='Replace README.md instead of writing README.generated.md'),
+    fast: bool = typer.Option(False, '--fast', help='Reduced prompt (~3x faster on 7B models, slightly less detail)'),
     verbose: bool = typer.Option(False, '--verbose', help='Enable debug logs'),
     show_thinking: bool = typer.Option(False, '--show-thinking', help='Show LLM diagnostic summaries and evidence traces'),
+    debug_llm: bool = typer.Option(False, '--debug-llm', help='Print full prompt sent to LLM and raw response (useful for debugging)'),
 ) -> None:
     setup_logging(verbose)
     settings = load_settings(config)
     if model:
         settings.llm.model = model
-    workflow, llm_service = _build_workflow(settings)
+    workflow, llm_service = _build_workflow(settings, fast=fast)
     _show_llm_preflight(llm_service.preflight())
     path = Path(project_path).expanduser().resolve()
     if not path.exists() or not path.is_dir():
         raise typer.BadParameter(f'Ruta inválida: {path}')
-    result = _run_single_project(workflow, path, overwrite=overwrite, show_thinking=show_thinking, verbose=verbose)
+    if fast:
+        console.print(Panel.fit(
+            '[bold yellow]Modo fast activo[/] — prompt reducido, ~3x más rápido en modelos 7B.',
+            border_style='yellow',
+        ))
+    result = _run_single_project(workflow, path, overwrite=overwrite, show_thinking=show_thinking, verbose=verbose, debug_llm=debug_llm)
     console.print(Panel.fit(f"README generado en: {result['output_path']}", title='Salida', border_style='green'))
     console.print(Panel.fit(json.dumps(result['project_profile'], ensure_ascii=False, indent=2), title='Perfil detectado', border_style='blue'))
     console.print(Panel.fit(json.dumps(result['heuristic_facts'], ensure_ascii=False, indent=2), title='Heurísticas', border_style='cyan'))
@@ -131,9 +144,11 @@ def batch(
     config: str = typer.Option('config.yaml', '--config', help='Path to YAML config'),
     model: str | None = typer.Option(None, '--model', help='Override Ollama model for this run'),
     overwrite: bool = typer.Option(False, '--overwrite', help='Replace README.md instead of writing README.generated.md'),
+    fast: bool = typer.Option(False, '--fast', help='Reduced prompt (~3x faster on 7B models, slightly less detail)'),
     max_projects: int | None = typer.Option(None, '--max-projects', help='Optional cap for discovered projects'),
     verbose: bool = typer.Option(False, '--verbose', help='Enable debug logs'),
     show_thinking: bool = typer.Option(False, '--show-thinking', help='Show LLM diagnostic summaries and evidence traces'),
+    debug_llm: bool = typer.Option(False, '--debug-llm', help='Print full prompt sent to LLM and raw response (useful for debugging)'),
 ) -> None:
     setup_logging(verbose)
     settings = load_settings(config)
@@ -143,7 +158,7 @@ def batch(
     if not base_path.exists() or not base_path.is_dir():
         raise typer.BadParameter(f'Ruta inválida: {base_path}')
     discovery = DiscoveryService(settings.discovery)
-    workflow, llm_service = _build_workflow(settings)
+    workflow, llm_service = _build_workflow(settings, fast=fast)
     _show_llm_preflight(llm_service.preflight())
     projects = discovery.discover_projects(base_path)
     if max_projects is not None:
@@ -151,25 +166,37 @@ def batch(
     if not projects:
         console.print(Panel.fit(f'No se detectaron proyectos en {base_path}', title='Sin resultados', border_style='yellow'))
         raise typer.Exit(code=0)
-    console.print(Panel.fit(f"[bold]Base:[/] {base_path}\n[bold]Proyectos detectados:[/] {len(projects)}\n[bold]Overwrite:[/] {'sí' if overwrite else 'no'}", title='Ejecución batch', border_style='cyan'))
+    console.print(Panel.fit(
+        f"[bold]Base:[/] {base_path}\n"
+        f"[bold]Proyectos detectados:[/] {len(projects)}\n"
+        f"[bold]Overwrite:[/] {'sí' if overwrite else 'no'}\n"
+        f"[bold]Modo fast:[/] {'sí' if fast else 'no'}",
+        title='Ejecución batch', border_style='cyan',
+    ))
     results: list[dict] = []
     with Progress(SpinnerColumn(), TextColumn('[progress.description]{task.description}'), BarColumn(), TextColumn('{task.completed}/{task.total}'), TimeElapsedColumn(), console=console) as progress:
         task_id = progress.add_task('Procesando proyectos', total=len(projects))
-        for project_path in projects:
-            logger.info('Procesando proyecto: %s', project_path)
-            progress.update(task_id, description=f'Procesando {project_path.name}')
+        for p in projects:
+            logger.info('Procesando proyecto: %s', p)
+            progress.update(task_id, description=f'Procesando {p.name}')
             try:
-                result = _run_single_project(workflow, project_path, overwrite=overwrite, show_thinking=show_thinking, verbose=verbose)
-                results.append({'project_name': result['project_profile'].get('project_name') or project_path.name, 'project_path': str(project_path), 'had_existing_readme': bool(result.get('existing_readme', '').strip()), 'output_path': result.get('output_path', ''), 'status': 'ok'})
+                result = _run_single_project(workflow, p, overwrite=overwrite, show_thinking=show_thinking, verbose=verbose, debug_llm=debug_llm)
+                results.append({
+                    'project_name': result['project_profile'].get('project_name') or p.name,
+                    'project_path': str(p),
+                    'had_existing_readme': bool(result.get('existing_readme', '').strip()),
+                    'output_path': result.get('output_path', ''),
+                    'status': 'ok',
+                })
             except Exception as exc:  # noqa: BLE001
-                logger.exception('Fallo procesando %s', project_path)
-                results.append({'project_name': project_path.name, 'project_path': str(project_path), 'had_existing_readme': False, 'output_path': '', 'status': f'error: {exc}'})
+                logger.exception('Fallo procesando %s', p)
+                results.append({'project_name': p.name, 'project_path': str(p), 'had_existing_readme': False, 'output_path': '', 'status': f'error: {exc}'})
             finally:
                 progress.advance(task_id)
     report_dir = base_path / settings.output.report_dir
     report_dir.mkdir(parents=True, exist_ok=True)
     report_json = report_dir / 'batch_report.json'
-    report_csv = report_dir / 'batch_report.csv'
+    report_csv  = report_dir / 'batch_report.csv'
     report_json.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding='utf-8')
     with report_csv.open('w', encoding='utf-8', newline='') as fh:
         writer = csv.DictWriter(fh, fieldnames=['project_name', 'project_path', 'had_existing_readme', 'output_path', 'status'])
