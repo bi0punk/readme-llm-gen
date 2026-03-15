@@ -6,6 +6,8 @@ from typing import Any, TypedDict
 class GraphState(TypedDict, total=False):
     project_path: str
     overwrite_readme: bool
+    dry_run: bool
+    save_analysis_json: bool
     observer: Any
     tree_summary: dict
     primary_files: list[dict[str, str]]

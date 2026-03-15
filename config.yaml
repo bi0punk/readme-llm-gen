@@ -1,7 +1,15 @@
 llm:
+  backend: "llamacpp"
   base_url: "http://192.168.1.81:11434"
-  model: "qwen2.5:3b"
+  model: "qwen2.5:7b"
+  llamacpp_base_url: "http://192.168.1.81:8080"
+  llamacpp_model_path: ""
+  llamacpp_n_ctx: 4096
+  llamacpp_n_threads: 0
+  llamacpp_n_gpu_layers: 0
   temperature: 0.1
+  timeout_seconds: 90
+  retry_count: 2
 
 discovery:
   max_depth: 3
@@ -34,9 +42,9 @@ discovery:
     - "manage.py"
 
 scanner:
-  max_files: 10
+  max_files: 12
   max_file_chars: 3500
-  max_total_chars: 22000
+  max_total_chars: 28000
   max_tree_entries: 250
   max_tree_depth: 4
   tree_mode: "system_auto"
@@ -45,8 +53,6 @@ scanner:
     - ".git"
     - ".venv"
     - "venv"
-    - "env"
-    - "ENV"
     - "env"
     - "ENV"
     - ".tox"
@@ -79,8 +85,17 @@ scanner:
     - "README.md"
     - "README.rst"
     - ".gitignore"
+    - ".readme-rebuilderignore"
 
 output:
   readme_name: "README.generated.md"
   report_dir: ".readme_rebuilder"
   save_analysis_json: true
+  persist_source_snippets: false
+  redact_secrets: true
+  write_atomically: true
+  save_readme_diff: true
+  diff_context_lines: 3
+
+batch:
+  concurrency: 2

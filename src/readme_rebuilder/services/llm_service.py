@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 from typing import Type, TypeVar
-from urllib import error, request
 
 from pydantic import BaseModel
 
 from readme_rebuilder.config import LLMSettings
+from readme_rebuilder.services.llm_adapters import build_adapter
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -18,24 +18,7 @@ class LLMService:
         self.requested_model = settings.model
         self.resolved_model = settings.model
         self.model = None
-
-    def _build_model(self, model_name: str):
-        try:
-            from langchain_ollama import ChatOllama
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                'Falta la dependencia langchain-ollama. Instálala con: pip install -e .'
-            ) from exc
-
-        return ChatOllama(
-            model=model_name,
-            base_url=self.settings.base_url,
-            temperature=self.settings.temperature,
-        )
-
-    def _ensure_model(self) -> None:
-        if self.model is None:
-            self.model = self._build_model(self.resolved_model)
+        self.adapter = build_adapter(settings)
 
     def set_observer(self, observer) -> None:
         self.observer = observer
@@ -54,12 +37,8 @@ class LLMService:
         if requested.endswith('-coder'):
             candidates.append(requested[:-6])
         candidates.extend([
-            'qwen2.5:7b',
-            'qwen2.5-coder:7b',
-            'qwen2.5:3b',
-            'llama3.1:8b',
-            'mistral:7b',
-            'phi4:14b',
+            'qwen2.5:7b', 'qwen2.5-coder:7b', 'qwen2.5:3b',
+            'llama3.1:8b', 'mistral:7b', 'phi4:14b',
         ])
         dedup: list[str] = []
         seen: set[str] = {requested, requested_norm}
@@ -72,26 +51,49 @@ class LLMService:
             seen.add(norm)
         return dedup
 
-    def _fetch_installed_models(self) -> list[str]:
-        base = self.settings.base_url.rstrip('/')
-        req = request.Request(f'{base}/api/tags', method='GET')
-        try:
-            with request.urlopen(req, timeout=5) as response:
-                payload = json.loads(response.read().decode('utf-8'))
-        except error.URLError as exc:
-            raise RuntimeError(
-                f'No fue posible contactar Ollama en {self.settings.base_url}. '
-                'Verifica que el servicio esté arriba y escuchando en ese puerto.'
-            ) from exc
-        except json.JSONDecodeError as exc:
-            raise RuntimeError('Ollama respondió con un JSON inválido al consultar /api/tags.') from exc
+    def _build_model(self, model_name: str):
+        return self.adapter.build_model(model_name)
 
-        models = payload.get('models', [])
-        names = [item.get('name', '').strip() for item in models if item.get('name')]
-        return sorted(set(names))
+    def _fetch_installed_models(self) -> list[str]:
+        return self.adapter.fetch_installed_models()
+
+    def _ensure_model(self) -> None:
+        if self.model is None:
+            self.model = self._build_model(self.resolved_model)
+
+    def _summarize_model_output(self, value: BaseModel | str) -> tuple[str, str | None]:
+        if isinstance(value, BaseModel):
+            data = value.model_dump()
+            compact = json.dumps(data, ensure_ascii=False, indent=2)
+            if 'project_name' in data and 'inferred_goal' in data:
+                return f"{data['project_name']} · contexto sintetizado", compact[:1600]
+            if 'gaps' in data:
+                return f"Gaps detectados: {', '.join(data['gaps'][:4]) or 'ninguno'}", compact[:1400]
+            if 'title' in data and 'tagline' in data:
+                return f"Secciones listas · {data['title'][:80]}", compact[:1600]
+            return 'Salida estructurada generada', compact[:1600]
+        text = str(value).strip()
+        first_line = text.splitlines()[0][:140] if text else 'sin contenido'
+        return first_line, text[:1400] if text else None
 
     def preflight(self) -> dict:
         installed = self._fetch_installed_models()
+
+        if self.settings.backend == 'llamacpp':
+            requested = self.settings.llamacpp_model_path or self.requested_model or 'server'
+            resolved = installed[0] if installed else 'local-model'
+            self.resolved_model = resolved
+            self.model = self._build_model(resolved)
+            return {
+                'base_url': self.settings.llamacpp_base_url,
+                'requested_model': requested,
+                'resolved_model': resolved,
+                'used_fallback': requested != resolved and not self.settings.llamacpp_model_path,
+                'installed_models': installed,
+                'backend': 'llamacpp',
+                'source': self.adapter.source_description(),
+            }
+
         installed_norm = {self._normalize_model_name(name): name for name in installed}
         requested = self.requested_model
         requested_norm = self._normalize_model_name(requested)
@@ -134,50 +136,36 @@ class LLMService:
             'resolved_model': self.resolved_model,
             'used_fallback': used_fallback,
             'installed_models': installed,
+            'backend': 'ollama',
+            'source': self.adapter.source_description(),
         }
-
-    def _summarize_model_output(self, value: BaseModel | str) -> tuple[str, str | None]:
-        if isinstance(value, BaseModel):
-            data = value.model_dump()
-            compact = json.dumps(data, ensure_ascii=False, indent=2)
-            if 'path' in data and 'purpose' in data:
-                return f"{data['path']} · {data['purpose'][:120]}", compact[:1400]
-            if 'project_name' in data and 'one_liner' in data:
-                return f"{data['project_name']} · {data['one_liner'][:120]}", compact[:1600]
-            if 'summary' in data and 'missing_sections' in data:
-                missing = ', '.join(data.get('missing_sections', [])[:3]) or 'sin vacíos críticos'
-                return f'README previo evaluado · faltantes: {missing}', compact[:1400]
-            if 'title' in data and 'tagline' in data:
-                return f"Secciones listas · {data['title'][:80]}", compact[:1600]
-            return 'Salida estructurada generada', compact[:1600]
-
-        text = str(value).strip()
-        first_line = text.splitlines()[0][:140] if text else 'sin contenido'
-        return first_line, text[:1400] if text else None
 
     def structured(self, prompt: str, schema: Type[T], label: str = 'structured_call') -> T:
         self._ensure_model()
         if self.observer:
             self.observer.llm_prompt(label=label, prompt=prompt)
             self.observer.llm_start(label=label, prompt_chars=len(prompt), schema_name=schema.__name__)
-        chain = self.model.with_structured_output(schema)
-        result = chain.invoke(prompt)
-        if self.observer:
-            summary, excerpt = self._summarize_model_output(result)
-            self.observer.llm_result(label=label, summary=summary, raw_excerpt=excerpt)
-        return result
+
+        last_error: Exception | None = None
+        for attempt in range(self.settings.retry_count + 1):
+            try:
+                result = self.adapter.structured_invoke(self.model, prompt, schema)
+                if self.observer:
+                    summary, excerpt = self._summarize_model_output(result)
+                    self.observer.llm_result(label=label, summary=summary, raw_excerpt=excerpt)
+                return result
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt >= self.settings.retry_count:
+                    break
+        raise RuntimeError(f'Fallo la llamada estructurada al LLM ({label}): {last_error}') from last_error
 
     def text(self, prompt: str, label: str = 'text_call') -> str:
         self._ensure_model()
         if self.observer:
             self.observer.llm_prompt(label=label, prompt=prompt)
             self.observer.llm_start(label=label, prompt_chars=len(prompt), schema_name=None)
-        response = self.model.invoke(prompt)
-        content = getattr(response, 'content', response)
-        if isinstance(content, list):
-            rendered = json.dumps(content, ensure_ascii=False, indent=2)
-        else:
-            rendered = str(content)
+        rendered = self.adapter.text_invoke(self.model, prompt)
         if self.observer:
             summary, excerpt = self._summarize_model_output(rendered)
             self.observer.llm_result(label=label, summary=summary, raw_excerpt=excerpt)

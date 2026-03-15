@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 from readme_rebuilder.config import ScannerSettings
-from readme_rebuilder.utils.path_filters import build_excluded_dir_set, is_excluded_path
+from readme_rebuilder.utils.fs_walk import iter_files
+from readme_rebuilder.utils.path_filters import build_excluded_dir_set
+from readme_rebuilder.utils.project_ignore import load_project_ignore
 
 
 class TreeService:
@@ -16,9 +18,6 @@ class TreeService:
 
     def _exclude_names(self) -> list[str]:
         return sorted(name for name in self.excluded_dirs if name)
-
-    def _is_excluded(self, path: Path) -> bool:
-        return is_excluded_path(path, self.excluded_dirs)
 
     def _system_tree_available(self) -> bool:
         return shutil.which('tree') is not None
@@ -72,30 +71,34 @@ class TreeService:
             'excluded_dirs': self._exclude_names(),
         }
 
-    def _build_tree_with_python_fallback(self, project_path: Path) -> dict:
+    def _build_tree_with_python_fallback(self, project_path: Path, ignore_matcher=None) -> dict:
         entries: list[str] = []
-        file_count = 0
         dir_count = 0
         truncated = False
-        for current in sorted(project_path.rglob('*')):
-            try:
-                rel = current.relative_to(project_path)
-            except ValueError:
-                continue
-            if self._is_excluded(rel):
-                continue
+        seen_dirs: set[str] = set()
+        file_count = 0
+        for rel, path in iter_files(project_path, self.excluded_dirs, include_hidden=True, ignore_matcher=ignore_matcher):
             if len(rel.parts) > self.settings.max_tree_depth:
                 continue
+            parent_parts = rel.parts[:-1]
+            for depth in range(1, len(parent_parts) + 1):
+                parent = '/'.join(parent_parts[:depth])
+                if parent not in seen_dirs:
+                    entries.append(f"{'  ' * (depth - 1)}{parent_parts[depth - 1]}/")
+                    seen_dirs.add(parent)
+                    dir_count += 1
+                    if len(entries) >= self.settings.max_tree_entries:
+                        truncated = True
+                        break
+            if truncated:
+                break
+            entries.append(f"{'  ' * len(parent_parts)}{rel.name}")
+            file_count += 1
             if len(entries) >= self.settings.max_tree_entries:
-                entries.append('... [tree output truncated]')
                 truncated = True
                 break
-            prefix = '  ' * max(len(rel.parts) - 1, 0)
-            entries.append(f"{prefix}{rel.name}{'/' if current.is_dir() else ''}")
-            if current.is_dir():
-                dir_count += 1
-            else:
-                file_count += 1
+        if truncated:
+            entries.append('... [tree output truncated]')
         return {
             'root': project_path.name,
             'directories': dir_count,
@@ -110,10 +113,13 @@ class TreeService:
 
     def build_tree_summary(self, project_path: Path) -> dict:
         mode = self.settings.tree_mode
+        ignore_matcher = load_project_ignore(project_path)
+        if ignore_matcher.active:
+            return self._build_tree_with_python_fallback(project_path, ignore_matcher=ignore_matcher)
         if mode in {'system', 'system_auto'}:
             system_tree = self._build_tree_with_system_command(project_path)
             if system_tree is not None:
                 return system_tree
             if mode == 'system':
                 raise RuntimeError("No se pudo ejecutar el comando 'tree' en modo system")
-        return self._build_tree_with_python_fallback(project_path)
+        return self._build_tree_with_python_fallback(project_path, ignore_matcher=ignore_matcher)

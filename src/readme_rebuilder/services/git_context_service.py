@@ -31,22 +31,27 @@ class GitContextService:
                 'current_branch': '',
                 'remotes': [],
                 'last_commit': '',
+                'last_commit_author': '',
                 'tracked_files_count': 0,
+                'is_dirty': False,
             }
 
         remotes_raw = self._run(project_path, ['remote', '-v'])
-        remotes = []
+        remotes: list[str] = []
+        seen_remotes: set[str] = set()
         for line in remotes_raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
             parts = line.split()
             if len(parts) >= 2:
-                remotes.append(f'{parts[0]} {parts[1]}')
+                remote = f'{parts[0]} {parts[1]}'
+                if remote not in seen_remotes:
+                    remotes.append(remote)
+                    seen_remotes.add(remote)
 
         tracked = self._run(project_path, ['ls-files'])
         branch = self._run(project_path, ['rev-parse', '--abbrev-ref', 'HEAD'])
         last_commit = self._run(project_path, ['log', '-1', '--pretty=format:%h %s'])
+        last_commit_author = self._run(project_path, ['log', '-1', '--pretty=format:%an'])
+        status = self._run(project_path, ['status', '--short'])
 
         git_dir_type = 'directory' if git_dir.is_dir() else 'file' if git_dir.is_file() else 'worktree-or-indirect'
         return {
@@ -55,5 +60,7 @@ class GitContextService:
             'current_branch': branch,
             'remotes': remotes,
             'last_commit': last_commit,
+            'last_commit_author': last_commit_author,
             'tracked_files_count': len([line for line in tracked.splitlines() if line.strip()]),
+            'is_dirty': bool(status.strip()),
         }

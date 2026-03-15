@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ExistingReadmeInsight(BaseModel):
@@ -19,6 +19,11 @@ class ContextDigest(BaseModel):
     testing_notes: list[str] = Field(default_factory=list)
     docker_notes: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
+
+
+class GapAnalysis(BaseModel):
+    gaps: list[str] = Field(default_factory=list)
+    rationale: str = ""
 
 
 class ReadmeBlueprint(BaseModel):
@@ -40,3 +45,27 @@ class ReadmeBlueprint(BaseModel):
     repository_notes: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+
+    @field_validator("project_name", "project_type", "primary_language", "one_liner", "title", "tagline", "overview")
+    @classmethod
+    def _normalize_str(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator(
+        "features", "architecture", "prerequisites", "installation", "configuration",
+        "usage", "testing", "docker", "repository_notes", "limitations", "next_steps"
+    )
+    @classmethod
+    def _dedupe_lists(cls, value: list[str]) -> list[str]:
+        clean: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            item = item.strip()
+            if not item:
+                continue
+            key = item.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            clean.append(item)
+        return clean

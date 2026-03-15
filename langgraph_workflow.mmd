@@ -1,0 +1,8 @@
+flowchart TD
+    A[gather_context] --> B[run_heuristics]
+    B --> C[build_primary_context]
+    C --> D[detect_information_gaps]
+    D --> E[enrich_context]
+    E --> F[build_blueprint]
+    F --> G[validate_blueprint]
+    G --> H[write_outputs + readme.diff]

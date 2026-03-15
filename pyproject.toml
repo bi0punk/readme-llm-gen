@@ -4,22 +4,41 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-readme-rebuilder"
-version = "0.8.0"
+version = "1.1.0"
 description = "Generate or rebuild professional README files for local projects using LangGraph and a local LLM"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-  { name = "OpenAI" }
+  { name = "bi0punk" }
 ]
 dependencies = [
-  "langchain>=0.3.0",
-  "langgraph>=0.2.0",
-  "langchain-ollama>=0.2.0",
-  "pydantic>=2.7.0",
-  "python-dotenv>=1.0.1",
-  "typer>=0.12.3",
-  "rich>=13.7.1",
-  "pyyaml>=6.0.2"
+  "langchain>=0.3.0,<0.4.0",
+  "langgraph>=0.2.0,<0.4.0",
+  "langchain-ollama>=0.2.0,<0.4.0",
+  "pydantic>=2.7.0,<3.0.0",
+  "python-dotenv>=1.0.1,<2.0.0",
+  "typer>=0.12.3,<1.0.0",
+  "rich>=13.7.1,<15.0.0",
+  "pyyaml>=6.0.2,<7.0.0"
+]
+
+[project.optional-dependencies]
+llamacpp-server = [
+  "langchain-openai>=0.1.0,<1.0.0",
+]
+llamacpp-local = [
+  "llama-cpp-python>=0.2.0",
+  "langchain-community>=0.2.0,<1.0.0",
+]
+all = [
+  "langchain-openai>=0.1.0,<1.0.0",
+  "llama-cpp-python>=0.2.0",
+  "langchain-community>=0.2.0,<1.0.0",
+]
+dev = [
+  "pytest>=8.0.0,<9.0.0",
+  "pytest-cov>=5.0.0,<6.0.0",
+  "ruff>=0.6.0,<1.0.0",
 ]
 
 [project.scripts]

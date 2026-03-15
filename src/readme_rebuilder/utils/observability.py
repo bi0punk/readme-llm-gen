@@ -18,7 +18,11 @@ STEP_TITLES = {
     # nombres actuales del grafo
     "gather_context":   "Contexto paralelo (tree + git + archivos)",
     "run_heuristics":   "Heurísticas locales",
+    "build_primary_context": "Síntesis primaria con LLM",
+    "detect_information_gaps": "Detección de huecos",
+    "enrich_context": "Enriquecimiento de contexto",
     "build_blueprint":  "Construcción del blueprint README",
+    "validate_blueprint": "Validación del blueprint",
     "write_outputs":    "Escritura de artefactos",
     # nombres legacy (por si se usan en tests o análisis JSON previos)
     "scan_tree":                  "Escaneo del árbol",
