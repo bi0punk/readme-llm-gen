@@ -77,7 +77,7 @@ class TreeService:
         truncated = False
         seen_dirs: set[str] = set()
         file_count = 0
-        for rel, path in iter_files(project_path, self.excluded_dirs, include_hidden=True, ignore_matcher=ignore_matcher):
+        for rel, _path in iter_files(project_path, self.excluded_dirs, include_hidden=True, ignore_matcher=ignore_matcher):
             if len(rel.parts) > self.settings.max_tree_depth:
                 continue
             parent_parts = rel.parts[:-1]

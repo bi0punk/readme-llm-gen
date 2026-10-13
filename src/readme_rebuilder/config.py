@@ -52,7 +52,7 @@ class LLMSettings(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_llamacpp_settings(self) -> "LLMSettings":
+    def _validate_llamacpp_settings(self) -> LLMSettings:
         if self.backend == "llamacpp" and self.llamacpp_model_path:
             expanded = Path(self.llamacpp_model_path).expanduser()
             self.llamacpp_model_path = str(expanded)

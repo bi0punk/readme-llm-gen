@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from readme_rebuilder.utils.path_filters import is_excluded_name, is_excluded_path
 

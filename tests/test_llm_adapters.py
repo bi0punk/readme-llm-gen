@@ -1,5 +1,10 @@
 from readme_rebuilder.config import LLMSettings
-from readme_rebuilder.services.llm_adapters import LlamaCppLocalAdapter, LlamaCppServerAdapter, OllamaAdapter, build_adapter
+from readme_rebuilder.services.llm_adapters import (
+    LlamaCppLocalAdapter,
+    LlamaCppServerAdapter,
+    OllamaAdapter,
+    build_adapter,
+)
 
 
 def test_build_adapter_for_ollama():

@@ -13,7 +13,6 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-
 STEP_TITLES = {
     # nombres actuales del grafo
     "gather_context":   "Contexto paralelo (tree + git + archivos)",
@@ -29,7 +28,6 @@ STEP_TITLES = {
     "select_primary_files":       "Selección primaria de archivos",
     "select_key_files":           "Selección de archivos clave",
     "summarize_primary_context":  "Síntesis primaria con LLM",
-    "detect_information_gaps":    "Detección de huecos",
     "select_secondary_files":     "Selección secundaria de archivos",
     "summarize_secondary_context":"Síntesis secundaria con LLM",
 }
@@ -121,10 +119,11 @@ class ConsoleRunObserver:
             "git_remotes",
         ]:
             value = facts.get(key, [])
-            if isinstance(value, list):
-                rendered = ", ".join(str(v) for v in value) if value else "-"
-            else:
-                rendered = str(value)
+            rendered = (
+                (", ".join(str(v) for v in value) if value else "-")
+                if isinstance(value, list)
+                else str(value)
+            )
             table.add_row(key, rendered)
         self.console.print(table)
         self._emit_event("heuristics", facts=facts)

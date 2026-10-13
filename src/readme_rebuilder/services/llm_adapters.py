@@ -4,7 +4,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Type, TypeVar
+from typing import TypeVar
 from urllib import error, request
 
 from pydantic import BaseModel
@@ -29,7 +29,7 @@ class BaseLLMAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def structured_invoke(self, model, prompt: str, schema: Type[T]) -> T:
+    def structured_invoke(self, model, prompt: str, schema: type[T]) -> T:
         raise NotImplementedError
 
     def text_invoke(self, model, prompt: str) -> str:
@@ -74,7 +74,7 @@ class OllamaAdapter(BaseLLMAdapter):
         names = [item.get('name', '').strip() for item in payload.get('models', []) if item.get('name')]
         return sorted(set(names))
 
-    def structured_invoke(self, model, prompt: str, schema: Type[T]) -> T:
+    def structured_invoke(self, model, prompt: str, schema: type[T]) -> T:
         chain = model.with_structured_output(schema)
         return chain.invoke(prompt)
 
@@ -93,9 +93,11 @@ class _JsonStructuredMixin:
             match = re.search(r'\{.*\}', stripped, re.DOTALL)
             if match:
                 return json.loads(match.group())
-            raise RuntimeError(f'El backend no devolvió JSON válido. Respuesta recibida:\n{stripped[:500]}')
+            raise RuntimeError(
+                f'El backend no devolvió JSON válido. Respuesta recibida:\n{stripped[:500]}'
+            ) from None
 
-    def _structured_prompt(self, prompt: str, schema: Type[T]) -> str:
+    def _structured_prompt(self, prompt: str, schema: type[T]) -> str:
         schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)
         return (
             f'{prompt}\n\n'
@@ -139,7 +141,7 @@ class LlamaCppServerAdapter(_JsonStructuredMixin, BaseLLMAdapter):
         names = [item.get('id', 'local-model') for item in payload.get('data', [])]
         return sorted(set(names)) or ['local-model']
 
-    def structured_invoke(self, model, prompt: str, schema: Type[T]) -> T:
+    def structured_invoke(self, model, prompt: str, schema: type[T]) -> T:
         response = model.invoke(self._structured_prompt(prompt, schema))
         content = getattr(response, 'content', response)
         if isinstance(content, list):
@@ -175,7 +177,7 @@ class LlamaCppLocalAdapter(_JsonStructuredMixin, BaseLLMAdapter):
             raise RuntimeError(f'Modelo GGUF no encontrado: {self.settings.llamacpp_model_path}')
         return [model_path.stem or model_path.name]
 
-    def structured_invoke(self, model, prompt: str, schema: Type[T]) -> T:
+    def structured_invoke(self, model, prompt: str, schema: type[T]) -> T:
         response = model.invoke(self._structured_prompt(prompt, schema))
         content = getattr(response, 'content', response)
         if isinstance(content, list):

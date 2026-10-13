@@ -139,7 +139,9 @@ class FileSelectorService:
                 'path': rel,
                 'content': snippet,
                 'size_bytes': str(path.stat().st_size),
-                'sha1': hashlib.sha1(content.encode('utf-8', errors='ignore')).hexdigest()[:12],
+                'sha1': hashlib.sha1(
+                    content.encode('utf-8', errors='ignore'), usedforsecurity=False
+                ).hexdigest()[:12],
                 'score': str(self._priority_score(rel)),
             })
             total_chars += len(snippet)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -140,7 +140,7 @@ class LLMService:
             'source': self.adapter.source_description(),
         }
 
-    def structured(self, prompt: str, schema: Type[T], label: str = 'structured_call') -> T:
+    def structured(self, prompt: str, schema: type[T], label: str = 'structured_call') -> T:
         self._ensure_model()
         if self.observer:
             self.observer.llm_prompt(label=label, prompt=prompt)
